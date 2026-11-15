@@ -229,5 +229,19 @@
     "text": "text-[13px] leading-5",
     "dynamic": false,
     "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/components/languages/LanguageBrowser.tsx",
+    "kind": "jsx-text",
+    "text": "Switch back ·",
+    "dynamic": false,
+    "count": 1
+  },
+  {
+    "filePath": "src/renderer/src/components/settings/appearance/AppearanceLanguageSetting.tsx",
+    "kind": "jsx-text",
+    "text": "Switch back",
+    "dynamic": false,
+    "count": 1
   }
 ]

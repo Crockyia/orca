@@ -1,8 +1,15 @@
-import type React from 'react'
-import type { GlobalSettings } from '../../../../../shared/global-settings-types'
-import { normalizeUiLanguage, type UiLanguage } from '../../../../../shared/ui-language'
+import { useState } from 'react'
+import { ArrowLeft } from 'lucide-react'
+import { LanguagePackDiscoverySummary } from '@/components/languages/LanguagePackDiscoverySummary'
+import {
+  normalizeUiLanguage,
+  isPluginUiLanguage,
+  type UiLanguage
+} from '../../../../../shared/ui-language'
+import { Button } from '@/components/ui/button'
+import { LanguagePickerDialog } from '@/components/languages/LanguagePickerDialog'
+import { useUiLanguageSelection } from '@/components/languages/use-ui-language-selection'
 import { UI_LANGUAGE_CHOICES } from '@/i18n/supported-languages'
-import { useLanguageReadiness } from '@/i18n/language-readiness'
 import { useTranslate } from '@/i18n/use-translate'
 import { SearchableSetting } from '../section-layout/SearchableSetting'
 import { SettingsRow } from '../form-controls/SettingsFormControls'
@@ -15,16 +22,20 @@ import { useUiLanguagePickerLabels } from './use-appearance-picker-labels'
 
 type AppearanceLanguageSettingProps = {
   uiLanguage: UiLanguage
-  updateSettings: (updates: Partial<GlobalSettings>) => void
   forceVisible: boolean
 }
 
 export function AppearanceLanguageSetting({
   uiLanguage,
-  updateSettings,
   forceVisible
 }: AppearanceLanguageSettingProps): React.JSX.Element {
   const t = useTranslate()
+  const selection = useUiLanguageSelection({
+    onboarding: false,
+    onClose: () => {},
+    disabled: false
+  })
+  const [browserOpen, setBrowserOpen] = useState(false)
   const languages = useUiLanguagePickerLabels()
   const languageEntry = getLanguageEntries()[0]
   const languageTitle = t('settings.appearance.language.title', 'Language')
@@ -58,9 +69,14 @@ export function AppearanceLanguageSetting({
       description={languageEntry?.description}
       keywords={languageEntry?.keywords ?? []}
       forceVisible={forceVisible}
+      id="appearance-language"
     >
       <SettingsRow
         label={languageTitle}
+        description={t(
+          'languages.settingsDescription',
+          'Built-in languages and community translations.'
+        )}
         control={
           <SettingsSearchableSelect
             ariaLabel={languageTitle}
@@ -68,16 +84,12 @@ export function AppearanceLanguageSetting({
             groups={[{ key: 'ui-languages', options: languageOptions }]}
             // Why: re-picking the saved language is the visible way to retry a catalog that failed to load.
             allowReselect
+            disabled={selection.selecting !== null}
             onValueChange={(value) => {
-              const next = normalizeUiLanguage(value)
-              if (next !== uiLanguage) {
-                updateSettings({ uiLanguage: next })
-                return
-              }
-              const readiness = useLanguageReadiness.getState()
-              if (readiness.error) {
-                readiness.retryLanguageLoad()
-              }
+              void selection.choose(
+                normalizeUiLanguage(value),
+                languageOptions.find((option) => option.value === value)?.label ?? value
+              )
             }}
             searchPlaceholder={t(
               'auto.components.settings.SettingsSearchableSelect.searchLanguages',
@@ -86,6 +98,27 @@ export function AppearanceLanguageSetting({
           />
         }
       />
+      <div className="flex flex-wrap items-center gap-2 pb-3">
+        <LanguagePackDiscoverySummary onExplore={() => setBrowserOpen(true)} />
+        {isPluginUiLanguage(uiLanguage) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            lang="en"
+            disabled={selection.selecting !== null}
+            onClick={() => void selection.restore()}
+          >
+            <ArrowLeft />
+            Switch back
+          </Button>
+        )}
+      </div>
+      {selection.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {selection.error}
+        </p>
+      )}
+      <LanguagePickerDialog open={browserOpen} onOpenChange={setBrowserOpen} />
     </SearchableSetting>
   )
 }

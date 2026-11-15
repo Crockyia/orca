@@ -19,6 +19,12 @@ import { OnboardingFooter } from './OnboardingFooter'
 import { shouldRequestOnboardingSkipConfirmation } from './onboarding-dismiss-target'
 import logo from '../../../../../resources/logo.svg'
 import { useTranslate } from '@/i18n/use-translate'
+import { useAppStore } from '@/store'
+import { getRendererLanguageDetection } from '../../../../shared/ui-locale'
+import { loadLanguagePackCatalog } from '../languages/use-language-pack-catalog'
+import { recommendedLanguagePack } from '../languages/language-pack-options'
+import { usePluginLanguagePackStore } from '@/store/plugins/localization/plugin-language-packs'
+import { isUsablePluginLanguagePack } from '../../../../shared/plugins/languages/plugin-language-pack-coverage'
 import { addAppKeyListener, removeAppKeyListener } from '@/lib/keyboard/app-keyboard-router'
 import { useScrollEdgeFades } from '@/lib/list-interaction/use-scroll-edge-fades'
 import { AgentSurfaceStep } from './AgentSurfaceStep'
@@ -49,7 +55,58 @@ export default function OnboardingFlow({
     (currentStep.id === 'notifications' && !flow.hasSelectedWorkspace
       ? t('components.onboarding.flow.actions.addFirstProject', 'Add your first project')
       : t('components.onboarding.flow.actions.continue', 'Continue'))
+  const [offerDeviceLanguage] = useState(() => {
+    const settings = useAppStore.getState().settings
+    return (
+      onboarding.lastCompletedStep < 0 &&
+      settings?.uiLanguage === 'system' &&
+      settings.pluginSystemEnabled &&
+      settings.languagePackSuggestionShown !== true &&
+      getRendererLanguageDetection().status === 'unsupported'
+    )
+  })
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false)
+  const automaticOfferConsidered = useRef(false)
+  useEffect(() => {
+    if (!offerDeviceLanguage || automaticOfferConsidered.current) {
+      return
+    }
+    if (stepIndex !== 0) {
+      automaticOfferConsidered.current = true
+      return
+    }
+    let active = true
+    void loadLanguagePackCatalog().then((catalog) => {
+      if (!active || automaticOfferConsidered.current) {
+        return
+      }
+      automaticOfferConsidered.current = true
+      const settings = useAppStore.getState().settings
+      if (
+        !catalog.error &&
+        settings?.uiLanguage === 'system' &&
+        !settings.languagePackSuggestionShown &&
+        recommendedLanguagePack(
+          [
+            ...usePluginLanguagePackStore.getState().entries.filter(isUsablePluginLanguagePack),
+            ...catalog.packs
+          ],
+          getRendererLanguageDetection().detectedTag
+        )
+      ) {
+        setLanguagePickerOpen(true)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [offerDeviceLanguage, stepIndex])
+  const changeLanguagePickerOpen = (open: boolean): void => {
+    setLanguagePickerOpen(open)
+    if (!open) {
+      void useAppStore.getState().updateSettings({ languagePackSuggestionShown: true })
+    }
+  }
   const [skipConfirmOpen, setSkipConfirmOpen] = useState(false)
   const skipConfirmAdvancedViaRef = useRef<'button' | 'keyboard'>('button')
   const { next: flowNext, dismissOnboarding: flowDismissOnboarding } = flow
@@ -109,6 +166,12 @@ export default function OnboardingFlow({
       <div
         className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-black/50 p-4 text-foreground"
         data-onboarding-overlay
+        onPointerDownCapture={() => {
+          automaticOfferConsidered.current = true
+        }}
+        onKeyDownCapture={() => {
+          automaticOfferConsidered.current = true
+        }}
         onPointerDown={(event) => {
           if (!shouldRequestOnboardingSkipConfirmation(event)) {
             return
@@ -145,7 +208,7 @@ export default function OnboardingFlow({
               </div>
               <OnboardingLanguageSwitcher
                 open={languagePickerOpen}
-                onOpenChange={setLanguagePickerOpen}
+                onOpenChange={changeLanguagePickerOpen}
               />
             </div>
 

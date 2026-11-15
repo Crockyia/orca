@@ -1,8 +1,25 @@
-import { useEffect, type RefObject } from 'react'
+import { useEffect, useSyncExternalStore, type RefObject } from 'react'
+import { NOTIFICATION_CARD_STACK_HEIGHT_VAR } from './notification-card-stack-height'
 
 // Why not :root: an inherited var change there restyles the whole document; only the cards and toaster read these.
 const readers = new Set<HTMLElement>()
 const values = new Map<string, string>()
+const listeners = new Set<() => void>()
+
+const subscribe = (listener: () => void): (() => void) => {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+export function useNotificationCardStackOccupied(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => values.has(NOTIFICATION_CARD_STACK_HEIGHT_VAR),
+    () => false
+  )
+}
 
 function writeVar(reader: HTMLElement, name: string, value: string | null): void {
   if (value === null) {
@@ -24,6 +41,9 @@ export function setNotificationCardLayoutVar(name: string, value: string | null)
   }
   for (const reader of readers) {
     writeVar(reader, name, value)
+  }
+  for (const listener of listeners) {
+    listener()
   }
 }
 
