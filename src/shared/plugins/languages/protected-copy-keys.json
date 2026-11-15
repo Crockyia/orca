@@ -728,6 +728,7 @@
     "components.native-chat.prompt.collapse",
     "components.native-chat.prompt.expand",
     "components.native-chat.question.openTerminal",
+    "components.native-chat.workerDock.notNow",
     "components.native-chat.wrapLines",
     "components.newWorkspace.directSetup.askRunDefaultTabs",
     "components.newWorkspace.directSetup.askRunSetup",
