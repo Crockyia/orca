@@ -6,11 +6,13 @@ import { AgentTypeIcon } from '@/components/agent/icons/agent-type-icon'
 import { cn } from '@/lib/class-names'
 import {
   buildSummaryAgentGroups,
+  isUnreadDoneAgent,
   selectSummaryGroupIconAgents,
   summarizeAgentIdentities,
   summarizeAgents
 } from './worktree-card-agent-summary'
 import { useTranslate } from '@/i18n/use-translate'
+import { useHasWorktreeCardUnreadRollup } from '../surface/worktree-card-title-status'
 
 import './worktree-card-compact-agent-row'
 
@@ -82,11 +84,14 @@ export function CompactAgentSummaryButton({
 }: CompactAgentSummaryButtonProps): React.JSX.Element {
   const t = useTranslate()
   const summary = summarizeAgents(agents, subjectLabel, t)
-  const groups = buildSummaryAgentGroups(
-    agents,
-    unreadByPaneKey ? (agent) => unreadByPaneKey[agent.paneKey] ?? false : undefined
-  )
-  const unreadCount = groups.find((group) => group.unread)?.agents.length ?? 0
+  const hasUnreadRollup = useHasWorktreeCardUnreadRollup()
+  const isUnread = unreadByPaneKey
+    ? (agent: DashboardAgentRowData) => unreadByPaneKey[agent.paneKey] ?? false
+    : undefined
+  // Rollup cards draw the one unread dot in the status lane; classic cards have no lane dot, so
+  // the folded pill keeps its own unread group or the signal would vanish until expanded.
+  const groups = buildSummaryAgentGroups(agents, hasUnreadRollup ? undefined : isUnread)
+  const unreadCount = agents.filter((agent) => isUnreadDoneAgent(agent, isUnread)).length
   const unreadSummary =
     unreadCount > 0
       ? t('auto.components.activity.ActivityTitlebarControls.unreadCount', '{{count}} unread', {
