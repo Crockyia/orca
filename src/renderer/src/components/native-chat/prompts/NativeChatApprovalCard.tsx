@@ -36,7 +36,7 @@ export type NativeChatApprovalCardProps = {
   /** Live time left before the agent decides on its own, shown only when its screen shows it. */
   countdown?: string
   /** `stacked`: one of several cards above the composer, not the chat's own slot (no slot height, no focus). */
-  placement?: 'composer' | 'stacked'
+  placement?: 'composer' | 'stacked' | 'dock'
 }
 
 /** PTY options are literal replies; structured options are journal ids. The first option is primary unless the options are neutral. */
@@ -59,7 +59,8 @@ export function NativeChatApprovalCard({
   const neededPath = approvalBlockedPathToShow(approval)
   // A newer Orca's subject: its detail is shown, and only the card's cancel answers.
   const newerSubject = isNewerApprovalSubject(approval.subject)
-  const stacked = placement === 'stacked'
+  const stacked = placement !== 'composer'
+  const joined = placement === 'dock'
   const hasContext = Boolean(
     countdown ||
     approval.description ||
@@ -73,10 +74,16 @@ export function NativeChatApprovalCard({
 
   return (
     <SecuritySurface>
-      <div className={stacked ? 'bg-chat-pane' : 'min-h-0 shrink overflow-hidden bg-chat-pane'}>
+      <div
+        className={
+          joined ? '' : stacked ? 'bg-chat-pane' : 'min-h-0 shrink overflow-hidden bg-chat-pane'
+        }
+      >
         <div
           className={cn(
-            'mx-auto flex w-full max-w-(--chat-content-max-width) px-3 pt-2 pb-1 sm:px-4',
+            joined
+              ? 'flex w-full'
+              : 'mx-auto flex w-full max-w-(--chat-content-max-width) px-3 pt-2 pb-1 sm:px-4',
             !stacked && 'h-full min-h-0 max-h-full'
           )}
         >
@@ -94,7 +101,10 @@ export function NativeChatApprovalCard({
                 escape()
               }
             }}
-            className="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-hidden rounded-lg border border-input bg-card px-4 py-3 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              'flex min-h-0 w-full flex-1 flex-col gap-2 overflow-hidden px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+              !joined && 'rounded-lg border border-input bg-card shadow-xs'
+            )}
           >
             <div className="flex shrink-0 items-start gap-2">
               <ShieldQuestion className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
@@ -129,6 +139,15 @@ export function NativeChatApprovalCard({
                 >
                   <X className="size-4" />
                 </button>
+              ) : onCollapse && joined ? (
+                <button
+                  type="button"
+                  onClick={onCollapse}
+                  disabled={isSubmitting}
+                  className="min-h-11 shrink-0 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                >
+                  Not now
+                </button>
               ) : onCollapse ? (
                 <NativeChatPromptCollapseToggle
                   expanded
@@ -142,7 +161,10 @@ export function NativeChatApprovalCard({
                 ref={contentRef}
                 data-native-chat-approval-content="true"
                 tabIndex={0}
-                className="min-h-0 max-h-72 shrink space-y-2 overflow-auto text-sm text-muted-foreground scrollbar-sleek focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                className={cn(
+                  'min-h-0 shrink space-y-2 overflow-auto text-sm text-muted-foreground scrollbar-sleek focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  joined ? 'max-h-40' : 'max-h-72'
+                )}
               >
                 {countdown ? <p className="tabular-nums">{countdown}</p> : null}
                 {approval.description ? (
