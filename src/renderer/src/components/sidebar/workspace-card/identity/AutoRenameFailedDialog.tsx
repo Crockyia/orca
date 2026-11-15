@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, Check, Copy } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AlertCircle, Check, Copy, LoaderCircle } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -10,11 +10,15 @@ import {
 import { Button } from '@/components/ui/button'
 import { Trans } from 'react-i18next'
 import { i18n } from '@/i18n/i18n'
-import { useTranslate } from '@/i18n/use-translate'
+import { useIntlLocale, useTranslate } from '@/i18n/use-translate'
 import { useAppStore } from '@/store/index'
 import { toast } from 'sonner'
 import type { ExecutionHostId } from '../../../../../../shared/execution-host'
 import { cn } from '@/lib/class-names'
+import { recomputeOn } from '@/lib/recompute-on'
+import { uiDateTimeFormat } from '@/i18n/ui-intl-formatters'
+import { useBranchAutoRenameRetry } from './use-branch-auto-rename-retry'
+import { branchAutoRenameReasonText } from './branch-auto-rename-reason-copy'
 
 type AutoRenameFailedDialogProps = {
   open: boolean
@@ -26,23 +30,71 @@ type AutoRenameFailedDialogProps = {
   error: string
 }
 
+/** Two stacked labels in one grid cell keep the button width stable while the label swaps. */
+function SwapLabel({ busy, idle, busyLabel }: { busy: boolean; idle: string; busyLabel: string }) {
+  return (
+    <span className="grid" aria-hidden="true">
+      <span
+        className={cn(
+          'col-start-1 row-start-1 transition-opacity duration-0',
+          busy ? 'opacity-0 delay-200' : 'opacity-100'
+        )}
+      >
+        {idle}
+      </span>
+      <span
+        className={cn(
+          'col-start-1 row-start-1 transition-opacity duration-0',
+          busy ? 'opacity-100 delay-200' : 'opacity-0'
+        )}
+      >
+        {busyLabel}
+      </span>
+    </span>
+  )
+}
+
 export function AutoRenameFailedDialog({
+  open,
   worktreeId,
   worktreeName,
   executionHostId,
   onOpenChange,
-  ...props
+  error
 }: AutoRenameFailedDialogProps): React.JSX.Element {
   const t = useTranslate()
   const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
   const [dismissing, setDismissing] = useState(false)
-  const dismissLabel = t(
-    'auto.components.sidebar.AutoRenameFailedDialog.dismissError',
-    'Dismiss error'
-  )
+  const tryAgainRef = useRef<HTMLButtonElement>(null)
+  const dismissRef = useRef<HTMLButtonElement>(null)
+  // A final retry result can clear the persisted error while the dialog stays open on its reason.
+  const [shownError, setShownError] = useState(error)
+  if (error && error !== shownError) {
+    setShownError(error)
+  }
+  const retry = useBranchAutoRenameRetry({
+    open,
+    worktreeId,
+    executionHostId,
+    onRenamed: () => onOpenChange(false),
+    onAttemptFinished: (outcome) => {
+      const dialog = (tryAgainRef.current ?? dismissRef.current)?.closest('[role="dialog"]')
+      if (!dialog?.contains(document.activeElement)) {
+        return
+      }
+      const target = outcome.kind === 'ineligible' ? dismissRef : tryAgainRef
+      requestAnimationFrame(() => target.current?.focus())
+    }
+  })
+  const dismissLabel = t('auto.components.sidebar.AutoRenameFailedDialog.dismiss', 'Dismiss')
   const dismissingLabel = t(
     'auto.components.sidebar.AutoRenameFailedDialog.dismissing',
     'Dismissing…'
+  )
+  const tryAgainLabel = t('auto.components.sidebar.AutoRenameFailedDialog.tryAgain', 'Try again')
+  const namingLabel = t(
+    'auto.components.sidebar.AutoRenameFailedDialog.namingBranch',
+    'Naming branch…'
   )
   const handleDismiss = async () => {
     setDismissing(true)
@@ -63,13 +115,21 @@ export function AutoRenameFailedDialog({
       setDismissing(false)
     }
   }
-  const readFullOutput = useCallback(
-    () => window.api.worktrees.getBranchRenameFailureOutput({ worktreeId }),
-    [worktreeId]
+  // Each finished attempt rereads the output, even when its error text is unchanged.
+  const readFullOutput = useMemo(
+    () =>
+      recomputeOn(
+        [retry.finishedCount],
+        () => () => window.api.worktrees.getBranchRenameFailureOutput({ worktreeId })
+      ),
+    [worktreeId, retry.finishedCount]
   )
+  const showTryAgain =
+    retry.availability !== 'unavailable' && retry.lastOutcome?.kind !== 'ineligible'
   return (
     <NameGenerationFailedDialog
-      {...props}
+      open={open}
+      error={shownError}
       onOpenChange={onOpenChange}
       title={t(
         'auto.components.sidebar.AutoRenameFailedDialog.ca3b225195',
@@ -87,35 +147,46 @@ export function AutoRenameFailedDialog({
         />
       }
       readFullOutput={readFullOutput}
+      showFooterClose={false}
+      detailOverride={branchAutoRenameReasonText(retry.lastOutcome, t)}
+      detailsFinishedAt={retry.lastFinishedAt}
       action={
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={dismissing}
-          aria-busy={dismissing}
-          aria-label={dismissing ? dismissingLabel : dismissLabel}
-          onClick={handleDismiss}
-        >
-          <span className="grid" aria-hidden="true">
-            <span
-              className={cn(
-                'col-start-1 row-start-1 transition-opacity duration-0',
-                dismissing ? 'opacity-0 delay-200' : 'opacity-100'
-              )}
+        <>
+          <Button
+            ref={dismissRef}
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={dismissing || retry.running}
+            aria-busy={dismissing}
+            aria-label={dismissing ? dismissingLabel : dismissLabel}
+            onClick={handleDismiss}
+          >
+            <SwapLabel busy={dismissing} idle={dismissLabel} busyLabel={dismissingLabel} />
+          </Button>
+          {showTryAgain ? (
+            <Button
+              ref={tryAgainRef}
+              type="button"
+              size="sm"
+              // Pending availability reserves the slot so the footer does not shift or flash.
+              className={retry.availability === 'pending' ? 'invisible' : undefined}
+              tabIndex={retry.availability === 'pending' ? -1 : undefined}
+              aria-hidden={retry.availability === 'pending' || undefined}
+              aria-disabled={retry.running || retry.availability === 'pending' || undefined}
+              aria-busy={retry.running}
+              aria-label={retry.running ? namingLabel : tryAgainLabel}
+              onClick={() => {
+                if (!retry.running && retry.availability === 'available') {
+                  retry.tryAgain()
+                }
+              }}
             >
-              {dismissLabel}
-            </span>
-            <span
-              className={cn(
-                'col-start-1 row-start-1 transition-opacity duration-0',
-                dismissing ? 'opacity-100 delay-200' : 'opacity-0'
-              )}
-            >
-              {dismissingLabel}
-            </span>
-          </span>
-        </Button>
+              {retry.running ? <LoaderCircle className="animate-spin" aria-hidden /> : null}
+              <SwapLabel busy={retry.running} idle={tryAgainLabel} busyLabel={namingLabel} />
+            </Button>
+          ) : null}
+        </>
       }
     />
   )
@@ -131,6 +202,12 @@ type NameGenerationFailedDialogProps = {
   /** Full CLI output still held in memory; null falls back to `error`. Keep it stable. */
   readFullOutput: () => Promise<string | null>
   action?: ReactNode
+  /** False drops the footer Close button; × and Esc still close. */
+  showFooterClose?: boolean
+  /** Replaces the details with a one-line reason after a retry. */
+  detailOverride?: string | null
+  /** When the latest retry finished; stamps the label so identical errors still read as new. */
+  detailsFinishedAt?: number | null
 }
 
 /** Full output is memory-only; fall back to the published excerpt after restart and scroll long replies. */
@@ -141,9 +218,13 @@ export function NameGenerationFailedDialog({
   description,
   error,
   readFullOutput,
-  action
+  action,
+  showFooterClose = true,
+  detailOverride = null,
+  detailsFinishedAt = null
 }: NameGenerationFailedDialogProps): React.JSX.Element {
   const t = useTranslate()
+  const intlLocale = useIntlLocale()
   const [copied, setCopied] = useState(false)
   const [fullOutput, setFullOutput] = useState<string | null>(null)
   const copiedResetTimerRef = useRef<number | null>(null)
@@ -178,7 +259,24 @@ export function NameGenerationFailedDialog({
     }
   }, [error, open, readFullOutput])
 
-  const detailText = fullOutput ?? error
+  const detailText = detailOverride ?? fullOutput ?? error
+  const detailsLabel =
+    detailsFinishedAt === null
+      ? t('auto.components.sidebar.AutoRenameFailedDialog.74fc00776f', 'Error details')
+      : t(
+          'auto.components.sidebar.AutoRenameFailedDialog.errorDetailsAt',
+          'Error details · {{time}}',
+          {
+            time: uiDateTimeFormat({ hour: 'numeric', minute: '2-digit' }, intlLocale).format(
+              detailsFinishedAt
+            )
+          }
+        )
+  // Announce the label and the reason or first error line, never the full output.
+  const announcement =
+    detailsFinishedAt === null
+      ? ''
+      : `${detailsLabel}. ${(detailOverride ?? error).split('\n')[0] ?? ''}`
 
   const handleCopy = useCallback(async () => {
     try {
@@ -209,9 +307,10 @@ export function NameGenerationFailedDialog({
         <p className="text-sm text-muted-foreground">{description}</p>
         {/* Cap and wrap literal CLI output; min-w-0 prevents unbroken tokens widening the grid. */}
         <div className="min-w-0 space-y-1.5">
-          <p className="text-xs font-medium text-foreground">
-            {t('auto.components.sidebar.AutoRenameFailedDialog.74fc00776f', 'Error details')}
-          </p>
+          <p className="text-xs font-medium text-foreground">{detailsLabel}</p>
+          <span className="sr-only" aria-live="polite">
+            {announcement}
+          </span>
           <div className="relative">
             <Button
               type="button"
@@ -233,9 +332,11 @@ export function NameGenerationFailedDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            {t('auto.components.sidebar.AutoRenameFailedDialog.aed1623b1e', 'Close')}
-          </Button>
+          {showFooterClose ? (
+            <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+              {t('auto.components.sidebar.AutoRenameFailedDialog.aed1623b1e', 'Close')}
+            </Button>
+          ) : null}
           {action}
         </DialogFooter>
       </DialogContent>
