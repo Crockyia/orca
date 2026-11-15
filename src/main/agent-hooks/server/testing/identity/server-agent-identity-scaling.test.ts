@@ -176,6 +176,7 @@ it('claims a running place only for an agent this runtime has observed', async (
   expect(await restarted.terminalAgentPlaces('claude_never_minted_here')).toBeNull()
   restarted.retireSleepingPaneOnSpawn(paneKey(0))
   restarted.ingestRemote(hook(0, 'session-0'), WSL)
+  await restarted.resolvePaneAgentId(paneKey(0), () => undefined)
   expect(await restarted.terminalAgentPlaces(id!)).toEqual([
     { paneKey: paneKey(0), worktreeId: 'wt-1' }
   ])
