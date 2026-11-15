@@ -182,6 +182,31 @@ it('claims a running place only for an agent this runtime has observed', async (
   ])
 })
 
+it('names a finished sleeping place for show, before and after a restart', async () => {
+  const dir = tempDir()
+  const first = await started(new RestartingServer(), dir)
+  first.ingestRemote(hook(0, 'session-0', 'Stop'), WSL)
+  await answered()
+  const id = first.getStatusSnapshot()[0]?.orcaSessionId
+  first.setTerminalPaneLifecycle({
+    ownsProcess: (key, pty) => key === paneKey(0) && pty === 'sleeping-pty',
+    isStopping: () => true,
+    isReversibleStop: (pty) => pty === 'sleeping-pty',
+    isPlaced: () => true
+  })
+  expect(first.settleTerminalPaneSleep(paneKey(0), 'sleeping-pty')).toBe(true)
+  const sleepingPlace = [
+    { paneKey: 'tab-0:00000000-0000-4000-8000-000000000000', worktreeId: 'wt-1' }
+  ]
+  expect(await first.terminalAgentPlaces(id!, { includeSleeping: true })).toEqual(sleepingPlace)
+
+  const saved = first.savedStatus()
+  first.stop()
+  const restarted = await started(new RestartingServer(saved), dir)
+  await answered()
+  expect(await restarted.terminalAgentPlaces(id!, { includeSleeping: true })).toEqual(sleepingPlace)
+})
+
 it('publishes a lost first answer as pending, and the click recovers the committed id', async () => {
   const server = await started(new IdentityTestServer())
   // The worker commits the link but its reply is lost, as when it crashes mid-answer.
